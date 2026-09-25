@@ -340,12 +340,12 @@
     const w = sprW(rows) * scale, h = sprH(rows) * scale;
     let value = randInt(type.min, type.max);
     if (big) value = Math.round(value * 3);
-    const speedBase = 50 + e * 1.8 + rand(0, 30);
+    const speedBase = 28 + e * 1.0 + rand(0, 12);   // casual pacing: slow start, gentle ramp
     g.items.push({
       type, rows, big, scale, w, h,
       hp: big ? 2 : 1, maxHp: big ? 2 : 1, value,
       x: rand(12, W - 12 - w), y: -h - 10,
-      vy: Math.min(big ? 200 : 280, speedBase * (big ? 0.7 : 1)),
+      vy: Math.min(big ? 120 : 170, speedBase * (big ? 0.7 : 1)),
       flash: 0,
     });
   }
@@ -391,7 +391,7 @@
     g.spawnTimer -= dt;
     if (g.spawnTimer <= 0) {
       spawnItem();
-      const interval = Math.max(0.38, 1.7 - g.elapsed * 0.022);
+      const interval = Math.max(0.6, 2.4 - g.elapsed * 0.02);
       g.spawnTimer = interval * rand(0.7, 1.3);
     }
 
