@@ -295,7 +295,7 @@
       player: { x: W / 2 - sprW(SPR.card) * CARD_SCALE / 2, w: sprW(SPR.card) * CARD_SCALE, h: sprH(SPR.card) * CARD_SCALE },
       bullets: [], items: [], particles: [], floats: [],
       score: 0, shot: 0, lives: LIVES, ammo: CLIP,
-      nextReportAt: 1000, reportsSpawned: 0,
+      nextReportAt: 500, reportsSpawned: 0,
       reloading: false, reloadProgress: 0,
       cooldown: 0, elapsed: 0, spawnTimer: 1.2, shake: 0,
     };
@@ -366,7 +366,7 @@
   }
 
   // Expense Report: a folder that bursts into several expenses when shot.
-  // First at $1,000 (2 expenses), then $1,500 (3), then every $500 (3).
+  // $500 and $1,000 bring 2 expenses each; from $1,500 every $500 brings 3.
   function spawnReport(count) {
     const rows = SPR.report, scale = 4;
     const w = sprW(rows) * scale, h = sprH(rows) * scale;
@@ -382,8 +382,8 @@
   function checkReportMilestone() {
     if (g.score < g.nextReportAt) return;
     g.reportsSpawned++;
-    spawnReport(g.reportsSpawned === 1 ? 2 : 3);
-    g.nextReportAt = g.reportsSpawned === 1 ? 1500 : g.nextReportAt + 500;
+    spawnReport(g.reportsSpawned <= 2 ? 2 : 3);
+    g.nextReportAt += 500;
   }
 
   function loseLife(reason, x, y) {
