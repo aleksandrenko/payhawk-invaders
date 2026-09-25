@@ -27,7 +27,7 @@
   const INK = '#535353', INK_SOFT = '#9d9d9d', PAPER = '#f7f7f7';
   const CUR = '$';
   const CLIP = 24;
-  const RELOAD_TIME = 1.2;        // seconds to hold space to top up the card
+  const RELOAD_TIME = 0.8;        // seconds to hold space to top up the card
   const LIVES = 3;
   const PLAYER_SPEED = 340;
   const BULLET_SPEED = 560;
@@ -340,7 +340,7 @@
     const w = sprW(rows) * scale, h = sprH(rows) * scale;
     let value = randInt(type.min, type.max);
     if (big) value = Math.round(value * 3);
-    const speedBase = 28 + e * 1.0 + rand(0, 12);   // casual pacing: slow start, gentle ramp
+    const speedBase = 42 + e * 1.0 + rand(0, 15);   // casual pacing: slow start, gentle ramp
     g.items.push({
       type, rows, big, scale, w, h,
       hp: big ? 2 : 1, maxHp: big ? 2 : 1, value,
@@ -391,7 +391,7 @@
     g.spawnTimer -= dt;
     if (g.spawnTimer <= 0) {
       spawnItem();
-      const interval = Math.max(0.6, 2.4 - g.elapsed * 0.02);
+      const interval = Math.max(0.6, 1.9 - g.elapsed * 0.018);
       g.spawnTimer = interval * rand(0.7, 1.3);
     }
 
@@ -526,7 +526,7 @@
     text('PAYHAWK INVADERS', W / 2, 200, { size: 34, align: 'center' });
     text('Shoot the expenses before they hit your card', W / 2, 240, { size: 13, align: 'center', weight: 'normal' });
     text('PRESS SPACE TO START', W / 2, 310, { size: 14, align: 'center' });
-    text('Score = total value of expenses shot. Clip of 24 $, hold SPACE 1.2s to top up the card.', W / 2, 350, { size: 11, align: 'center', weight: 'normal' });
+    text('Score = total value of expenses shot. Clip of 24 $, hold SPACE 0.8s to top up the card.', W / 2, 350, { size: 11, align: 'center', weight: 'normal' });
     text('Big double-value expenses need two hits. Miss three and it’s game over.', W / 2, 368, { size: 11, align: 'center', weight: 'normal' });
     // decorative sample expenses
     const sample = ['coffee', 'taxi', 'software', 'flight'];
