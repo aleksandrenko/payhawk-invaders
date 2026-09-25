@@ -76,6 +76,20 @@
       '#................#',
       '##################',
     ],
+    report: [
+      '............',
+      '.#####......',
+      '#.....#.....',
+      '############',
+      '#..........#',
+      '#..........#',
+      '#..#####...#',
+      '#..........#',
+      '#..#####...#',
+      '#..........#',
+      '############',
+      '............',
+    ],
     coffee: [
       '............',
       '...#######..',
@@ -281,6 +295,7 @@
       player: { x: W / 2 - sprW(SPR.card) * CARD_SCALE / 2, w: sprW(SPR.card) * CARD_SCALE, h: sprH(SPR.card) * CARD_SCALE },
       bullets: [], items: [], particles: [], floats: [],
       score: 0, shot: 0, lives: LIVES, ammo: CLIP,
+      nextReportAt: 1000, reportsSpawned: 0,
       reloading: false, reloadProgress: 0,
       cooldown: 0, elapsed: 0, spawnTimer: 1.2, shake: 0,
     };
@@ -329,12 +344,12 @@
   }
 
   // ---------- spawning ----------
-  function spawnItem() {
+  function spawnItem(at) {
     const e = g.elapsed;
     const unlocked = Math.min(TYPES.length, 3 + Math.floor(e / 12));
     const type = TYPES[randInt(0, unlocked - 1)];
     const bigChance = e < 15 ? 0 : Math.min(0.2, (e - 15) * 0.007);
-    const big = Math.random() < bigChance;
+    const big = !at && Math.random() < bigChance;
     const scale = big ? 6 : 3;
     const rows = SPR[type.key];
     const w = sprW(rows) * scale, h = sprH(rows) * scale;
@@ -344,10 +359,31 @@
     g.items.push({
       type, rows, big, scale, w, h,
       hp: big ? 2 : 1, maxHp: big ? 2 : 1, value,
-      x: rand(12, W - 12 - w), y: -h - 10,
+      x: at ? Math.max(4, Math.min(W - 4 - w, at.x - w / 2)) : rand(12, W - 12 - w), y: at ? at.y : -h - 10,
       vy: Math.min(big ? 120 : 170, speedBase * (big ? 0.7 : 1)),
       flash: 0,
     });
+  }
+
+  // Expense Report: a folder that bursts into several expenses when shot.
+  // First at $1,000 (2 expenses), then $1,500 (3), then every $500 (3).
+  function spawnReport(count) {
+    const rows = SPR.report, scale = 4;
+    const w = sprW(rows) * scale, h = sprH(rows) * scale;
+    g.items.push({
+      type: { key: 'report', name: 'Expense report' }, rows, big: false, report: true, count, scale, w, h,
+      hp: 1, maxHp: 1, value: 0,
+      x: rand(60, W - 60 - w), y: -h - 10,
+      vy: Math.min(110, 30 + g.elapsed * 0.6),
+      flash: 0,
+    });
+    g.floats.push({ x: W / 2, y: 120, text: 'EXPENSE REPORT INCOMING', t: 1.6, big: true });
+  }
+  function checkReportMilestone() {
+    if (g.score < g.nextReportAt) return;
+    g.reportsSpawned++;
+    spawnReport(g.reportsSpawned === 1 ? 2 : 3);
+    g.nextReportAt = g.reportsSpawned === 1 ? 1500 : g.nextReportAt + 500;
   }
 
   function loseLife(reason, x, y) {
@@ -408,10 +444,19 @@
         if (b.x < it.x + it.w && b.x + b.w > it.x && b.y < it.y + it.h && b.y + b.h > it.y) {
           b.dead = true; it.hp--; it.flash = 0.12;
           if (it.hp <= 0) {
-            it.dead = true; g.score += it.value; g.shot++;
-            g.floats.push({ x: it.x + it.w / 2, y: it.y + it.h / 2, text: '+' + money(it.value), t: 1, big: it.big });
-            burst(it.x + it.w / 2, it.y + it.h / 2, it.big ? 18 : 8, it.big ? 5 : 3);
-            SFX.hit();
+            it.dead = true;
+            if (it.report) {
+              const cx = it.x + it.w / 2, cy = it.y + it.h / 2;
+              for (let k = 0; k < it.count; k++) spawnItem({ x: cx + (k - (it.count - 1) / 2) * 64, y: cy - 10 });
+              g.floats.push({ x: cx, y: cy - 20, text: it.count + ' EXPENSES!', t: 1.2, big: true });
+              burst(cx, cy, 20, 4); SFX.reload();
+            } else {
+              g.score += it.value; g.shot++;
+              g.floats.push({ x: it.x + it.w / 2, y: it.y + it.h / 2, text: '+' + money(it.value), t: 1, big: it.big });
+              burst(it.x + it.w / 2, it.y + it.h / 2, it.big ? 18 : 8, it.big ? 5 : 3);
+              SFX.hit();
+              checkReportMilestone();
+            }
           } else { burst(b.x + 5, b.y, 4, 3); SFX.crack(); }
           break;
         }
@@ -482,7 +527,7 @@
         ctx.fillStyle = PAPER;
         for (let i = 0; i < it.h; i += 4) ctx.fillRect(Math.round(it.x + it.w * 0.35 + (i / it.h) * it.w * 0.3), Math.round(it.y + i), 4, 3);
       }
-      text(money(it.value), it.x + it.w / 2, it.y + it.h + 9, { size: it.big ? 15 : 11, align: 'center' });
+      text(it.report ? 'REPORT \u00d7' + it.count : money(it.value), it.x + it.w / 2, it.y + it.h + 9, { size: it.big || it.report ? 15 : 11, align: 'center' });
       if (it.big) {
         for (let i = 0; i < it.maxHp; i++) {
           ctx.fillStyle = i < it.hp ? INK : PAPER;
@@ -527,7 +572,7 @@
     text('Shoot the expenses before they hit your card', W / 2, 240, { size: 13, align: 'center', weight: 'normal' });
     text('PRESS SPACE TO START', W / 2, 310, { size: 14, align: 'center' });
     text('Score = total value of expenses shot. Clip of 24 $, hold SPACE 0.8s to top up the card.', W / 2, 350, { size: 11, align: 'center', weight: 'normal' });
-    text('Big double-value expenses need two hits. Miss three and it’s game over.', W / 2, 368, { size: 11, align: 'center', weight: 'normal' });
+    text('Big expenses need two hits. Expense reports burst into more expenses. Miss three and it’s game over.', W / 2, 368, { size: 11, align: 'center', weight: 'normal' });
     // decorative sample expenses
     const sample = ['coffee', 'taxi', 'software', 'flight'];
     sample.forEach((k, i) => drawSprite(SPR[k], W / 2 - 150 + i * 90, 410, 3));
