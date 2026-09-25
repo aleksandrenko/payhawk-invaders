@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payhawk Invaders</title>
+<style>
+  :root { --ink: #535353; --paper: #f7f7f7; }
+  html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink);
+    font-family: "Courier New", Courier, monospace; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  canvas { display: block; width: min(96vw, 800px, calc((100vh - 70px) * 1.25)); height: auto; image-rendering: pixelated;
+    image-rendering: crisp-edges; outline: none; }
+  .hint { margin: 0; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; opacity: .7; text-align: center; padding: 0 16px; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="640" tabindex="0" aria-label="Payhawk Invaders game"></canvas>
+<p class="hint">&larr; &rarr; move &middot; space shoot &middot; hold space to top up &middot; p pause &middot; m mute</p>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const GROUND = H - 46;
+  const INK = '#535353', INK_SOFT = '#9d9d9d', PAPER = '#f7f7f7';
+  const CUR = '$';
+  const CLIP = 24;
+  const RELOAD_TIME = 1.2;        // seconds to hold space to top up the card
+  const LIVES = 3;
+  const PLAYER_SPEED = 340;
+  const BULLET_SPEED = 560;
+  const FIRE_COOLDOWN = 0.11;
+
+  // ---------- pixel sprites ('#' = ink) ----------
+  const SPR = {
+    card: [
+      '####################',
+      '#..................#',
+      '#..................#',
+      '####################',
+      '####################',
+      '#..................#',
+      '#..####............#',
+      '#..#..#............#',
+      '#..####............#',
+      '#..................#',
+      '#..................#',
+      '#..................#',
+      '####################',
+    ],
+    dollar: [
+      '..#..',
+      '.####',
+      '#.#..',
+      '.###.',
+      '..#.#',
+      '####.',
+      '..#..',
+    ],
+    heart: [
+      '.##.##.',
+      '#######',
+      '#######',
+      '.#####.',
+      '..###..',
+      '...#...',
+    ],
+    cloud: [
+      '.......####.......',
+      '.....##....##.....',
+      '....#........#....',
+      '..###.........##..',
+      '.#..............#.',
+      '#................#',
+      '##################',
+    ],
+    coffee: [
+      '............',
+      '...#######..',
+      '...#.....##.',
+      '...#.....#.#',
+      '...#.....#.#',
+      '...#.....##.',
+      '...#.....#..',
+      '....#####...',
+      '............',
+      '..#########.',
+      '...#######..',
+      '............',
+    ],
+    lunch: [
+      '.#.#.#..###.',
+      '.#.#.#..###.',
+      '.#.#.#..###.',
+      '.#####..###.',
+      '..###...##..',
+      '...#....#...',
+      '...#....#...',
+      '...#....#...',
+      '...#....#...',
+      '...#....#...',
+      '...#....#...',
+      '............',
+    ],
+    taxi: [
+      '............',
+      '....####....',
+      '...######...',
+      '..#......#..',
+      '.#........#.',
+      '############',
+      '#..#....#..#',
+      '############',
+      '.##......##.',
+      '.##......##.',
+      '............',
+      '............',
+    ],
+    office: [
+      '..########..',
+      '..#......#..',
+      '..#.####.#..',
+      '..#......#..',
+      '..#.####.#..',
+      '..#......#..',
+      '..#.####.#..',
+      '..#......#..',
+      '..#.##...#..',
+      '..#......#..',
+      '..#.#.#.##..',
+      '..##.#.#.#..',
+    ],
+    train: [
+      '....####....',
+      '..########..',
+      '..#..##..#..',
+      '..#..##..#..',
+      '..########..',
+      '..#......#..',
+      '..########..',
+      '..#.#..#.#..',
+      '..########..',
+      '...#....#...',
+      '..#......#..',
+      '............',
+    ],
+    fuel: [
+      '..######....',
+      '..#....#....',
+      '..#....#.#..',
+      '..#....##.#.',
+      '..######..#.',
+      '..#....#..#.',
+      '..#....#..#.',
+      '..#....#.##.',
+      '..#....#....',
+      '..######....',
+      '.########...',
+      '............',
+    ],
+    software: [
+      '............',
+      '.##########.',
+      '.#........#.',
+      '.#.##.##..#.',
+      '.#........#.',
+      '.#..####..#.',
+      '.#........#.',
+      '.##########.',
+      '############',
+      '#..........#',
+      '############',
+      '............',
+    ],
+    hotel: [
+      '............',
+      '..########..',
+      '..#.#..#.#..',
+      '..########..',
+      '..#.#..#.#..',
+      '..########..',
+      '..#.#..#.#..',
+      '..########..',
+      '..#..##..#..',
+      '..#..##..#..',
+      '..########..',
+      '............',
+    ],
+    flight: [
+      '.....##.....',
+      '.....##.....',
+      '....####....',
+      '....####....',
+      '.##########.',
+      '############',
+      '.#..####..#.',
+      '.....##.....',
+      '....####....',
+      '...######...',
+      '............',
+      '............',
+    ],
+  };
+
+  // Expense catalogue, cheap -> expensive. Later entries unlock as the game progresses.
+  const TYPES = [
+    { key: 'coffee',   name: 'Coffee',            min: 3,   max: 9   },
+    { key: 'lunch',    name: 'Team lunch',        min: 15,  max: 45  },
+    { key: 'taxi',     name: 'Taxi',              min: 12,  max: 40  },
+    { key: 'office',   name: 'Office supplies',   min: 10,  max: 60  },
+    { key: 'train',    name: 'Train ticket',      min: 20,  max: 80  },
+    { key: 'fuel',     name: 'Fuel',              min: 40,  max: 90  },
+    { key: 'software', name: 'SaaS subscription', min: 29,  max: 199 },
+    { key: 'hotel',    name: 'Hotel',             min: 90,  max: 300 },
+    { key: 'flight',   name: 'Flight',            min: 120, max: 600 },
+  ];
+
+  const sprW = rows => Math.max(...rows.map(r => r.length));
+  const sprH = rows => rows.length;
+  function drawSprite(rows, x, y, s, color = INK) {
+    ctx.fillStyle = color;
+    x = Math.round(x); y = Math.round(y);
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      for (let c = 0; c < row.length; c++) if (row[c] === '#') ctx.fillRect(x + c * s, y + r * s, s, s);
+    }
+  }
+  // Payhawk "P" mark (the P glyph of hawky-react payhawk-logo.svg), rasterised to a crisp 1-bit sprite
+  const P_PATH = 'M8.027 0H0v4.417a2.975 2.975 0 0 0 2.983 2.967V2.51h4.413c1.989 0 3.056 1.013 3.056 2.774 0 2.05-1.334 2.798-3.056 2.798H2.983A2.975 2.975 0 0 0 0 11.048v6.175h2.983V10.59h5.044c3.516 0 5.432-2.17 5.432-5.306S11.544 0 8.027 0z';
+  const P_VB = { w: 13.46, h: 17.23 };
+  function rasterLogo(width) {
+    const height = Math.round(width * P_VB.h / P_VB.w);
+    const off = document.createElement('canvas'); off.width = width; off.height = height;
+    const oc = off.getContext('2d');
+    oc.scale(width / P_VB.w, height / P_VB.h); oc.fillStyle = '#000'; oc.fill(new Path2D(P_PATH));
+    const d = oc.getImageData(0, 0, width, height).data, rows = [];
+    for (let y = 0; y < height; y++) { let r = ''; for (let x = 0; x < width; x++) r += d[(y * width + x) * 4 + 3] >= 110 ? '#' : '.'; rows.push(r); }
+    return rows;
+  }
+  const CARD_SCALE = 3;
+  const LOGO = rasterLogo(11);   // 11x14 px "P", drawn at 1px per cell on the card
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const money = n => CUR + Math.round(n).toLocaleString('en-US');
+
+  // ---------- audio (tiny beeps, like the dino) ----------
+  let ac = null, muted = false;
+  function ensureAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } } }
+  function beep(freq, dur, { type = 'square', vol = 0.06, slide = 0 } = {}) {
+    if (muted || !ac) return;
+    const t = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
+  }
+  const SFX = {
+    shoot: () => beep(880, 0.05, { slide: 1400 }),
+    empty: () => beep(180, 0.04, { type: 'triangle', vol: 0.05 }),
+    hit:   () => beep(520, 0.08, { slide: 220 }),
+    crack: () => beep(300, 0.06, { type: 'sawtooth', vol: 0.04 }),
+    reload:() => { beep(660, 0.07); setTimeout(() => beep(990, 0.1), 80); },
+    lose:  () => beep(160, 0.35, { type: 'sawtooth', slide: 60, vol: 0.07 }),
+    over:  () => { beep(300, 0.15); setTimeout(() => beep(240, 0.15), 160); setTimeout(() => beep(180, 0.35), 320); },
+  };
+
+  // ---------- state ----------
+  const HI_KEY = 'payhawk-invaders-hi';
+  let hi = 0; try { hi = Number(localStorage.getItem(HI_KEY)) || 0; } catch (e) {}
+  let state = 'title'; // title | playing | paused | over
+  const keys = { left: false, right: false, space: false, r: false };
+  let g;
+  const clouds = [{ x: 90, y: 70 }, { x: 380, y: 120 }, { x: 640, y: 55 }];
+  const groundMarks = Array.from({ length: 40 }, () => ({ x: Math.random() * W, w: randInt(2, 8) }));
+
+  function reset() {
+    g = {
+      player: { x: W / 2 - sprW(SPR.card) * CARD_SCALE / 2, w: sprW(SPR.card) * CARD_SCALE, h: sprH(SPR.card) * CARD_SCALE },
+      bullets: [], items: [], particles: [], floats: [],
+      score: 0, shot: 0, lives: LIVES, ammo: CLIP,
+      reloading: false, reloadProgress: 0,
+      cooldown: 0, elapsed: 0, spawnTimer: 1.2, shake: 0,
+    };
+  }
+  reset();
+
+  function start() { reset(); state = 'playing'; }
+
+  // ---------- input ----------
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') e.preventDefault();
+    ensureAudio();
+    if (e.repeat) { if (e.code === 'Space') keys.space = true; return; }
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': keys.left = true; break;
+      case 'ArrowRight': case 'KeyD': keys.right = true; break;
+      case 'KeyR': keys.r = true; break;
+      case 'KeyM': muted = !muted; break;
+      case 'KeyP': if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; break;
+      case 'Space':
+        keys.space = true;
+        if (state === 'title' || state === 'over') { start(); break; }
+        if (state === 'paused') { state = 'playing'; break; }
+        if (state === 'playing') shoot();
+        break;
+    }
+  });
+  window.addEventListener('keyup', e => {
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': keys.left = false; break;
+      case 'ArrowRight': case 'KeyD': keys.right = false; break;
+      case 'KeyR': keys.r = false; break;
+      case 'Space': keys.space = false; break;
+    }
+  });
+  window.addEventListener('blur', () => { keys.left = keys.right = keys.space = keys.r = false; });
+  canvas.addEventListener('pointerdown', () => { ensureAudio(); if (state === 'title' || state === 'over') start(); });
+
+  function shoot() {
+    if (g.reloading) return;
+    if (g.ammo <= 0) { SFX.empty(); return; }
+    if (g.cooldown > 0) return;
+    const p = g.player;
+    g.bullets.push({ x: p.x + p.w / 2 - 5, y: GROUND - p.h - 12, w: 10, h: 14 });
+    g.ammo--; g.cooldown = FIRE_COOLDOWN; SFX.shoot();
+  }
+
+  // ---------- spawning ----------
+  function spawnItem() {
+    const e = g.elapsed;
+    const unlocked = Math.min(TYPES.length, 3 + Math.floor(e / 12));
+    const type = TYPES[randInt(0, unlocked - 1)];
+    const bigChance = e < 15 ? 0 : Math.min(0.2, (e - 15) * 0.007);
+    const big = Math.random() < bigChance;
+    const scale = big ? 6 : 3;
+    const rows = SPR[type.key];
+    const w = sprW(rows) * scale, h = sprH(rows) * scale;
+    let value = randInt(type.min, type.max);
+    if (big) value = Math.round(value * 3);
+    const speedBase = 50 + e * 1.8 + rand(0, 30);
+    g.items.push({
+      type, rows, big, scale, w, h,
+      hp: big ? 2 : 1, maxHp: big ? 2 : 1, value,
+      x: rand(12, W - 12 - w), y: -h - 10,
+      vy: Math.min(big ? 200 : 280, speedBase * (big ? 0.7 : 1)),
+      flash: 0,
+    });
+  }
+
+  function loseLife(reason, x, y) {
+    g.lives--; g.shake = 0.35;
+    g.floats.push({ x, y, text: reason, t: 1.2 });
+    if (g.lives <= 0) { state = 'over'; SFX.over(); if (g.score > hi) { hi = g.score; try { localStorage.setItem(HI_KEY, String(hi)); } catch (e) {} } }
+    else SFX.lose();
+  }
+
+  function burst(x, y, n, s) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(60, 220);
+      g.particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80, t: rand(0.4, 0.8), s });
+    }
+  }
+
+  // ---------- update ----------
+  function update(dt) {
+    const p = g.player;
+    g.elapsed += dt;
+    g.cooldown = Math.max(0, g.cooldown - dt);
+    if (g.shake > 0) g.shake -= dt;
+
+    // move
+    const dir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+    p.x = Math.max(4, Math.min(W - 4 - p.w, p.x + dir * PLAYER_SPEED * dt));
+
+    // reload: hold space with an empty clip (or hold R any time)
+    const wantsReload = (g.ammo <= 0 && keys.space) || (keys.r && g.ammo < CLIP);
+    if (wantsReload) {
+      g.reloading = true;
+      g.reloadProgress += dt;
+      if (g.reloadProgress >= RELOAD_TIME) { g.ammo = CLIP; g.reloading = false; g.reloadProgress = 0; SFX.reload(); }
+    } else if (g.reloading) { g.reloading = false; g.reloadProgress = 0; }
+
+    // bullets
+    for (const b of g.bullets) b.y -= BULLET_SPEED * dt;
+    g.bullets = g.bullets.filter(b => b.y + b.h > 0);
+
+    // spawn
+    g.spawnTimer -= dt;
+    if (g.spawnTimer <= 0) {
+      spawnItem();
+      const interval = Math.max(0.38, 1.7 - g.elapsed * 0.022);
+      g.spawnTimer = interval * rand(0.7, 1.3);
+    }
+
+    // items
+    for (const it of g.items) {
+      it.y += it.vy * dt;
+      if (it.flash > 0) it.flash -= dt;
+    }
+
+    // bullet vs item
+    for (const b of g.bullets) {
+      for (const it of g.items) {
+        if (it.dead) continue;
+        if (b.x < it.x + it.w && b.x + b.w > it.x && b.y < it.y + it.h && b.y + b.h > it.y) {
+          b.dead = true; it.hp--; it.flash = 0.12;
+          if (it.hp <= 0) {
+            it.dead = true; g.score += it.value; g.shot++;
+            g.floats.push({ x: it.x + it.w / 2, y: it.y + it.h / 2, text: '+' + money(it.value), t: 1, big: it.big });
+            burst(it.x + it.w / 2, it.y + it.h / 2, it.big ? 18 : 8, it.big ? 5 : 3);
+            SFX.hit();
+          } else { burst(b.x + 5, b.y, 4, 3); SFX.crack(); }
+          break;
+        }
+      }
+    }
+    g.bullets = g.bullets.filter(b => !b.dead);
+
+    // item reaches ground / hits the card
+    const py = GROUND - p.h;
+    for (const it of g.items) {
+      if (it.dead) continue;
+      if (it.x < p.x + p.w && it.x + it.w > p.x && it.y < GROUND && it.y + it.h > py + 6) {
+        it.dead = true; burst(it.x + it.w / 2, it.y + it.h / 2, 10, 3); loseLife('OUCH', it.x + it.w / 2, py - 10);
+      } else if (it.y + it.h >= GROUND) {
+        it.dead = true; burst(it.x + it.w / 2, GROUND, 6, 3); loseLife('MISSED', it.x + it.w / 2, GROUND - 24);
+      }
+    }
+    g.items = g.items.filter(it => !it.dead);
+
+    // particles / floats
+    for (const q of g.particles) { q.t -= dt; q.vy += 500 * dt; q.x += q.vx * dt; q.y += q.vy * dt; }
+    g.particles = g.particles.filter(q => q.t > 0);
+    for (const f of g.floats) { f.t -= dt; f.y -= 40 * dt; }
+    g.floats = g.floats.filter(f => f.t > 0);
+  }
+
+
+  // ---------- draw ----------
+  function text(str, x, y, { size = 14, align = 'left', color = INK, weight = 'bold' } = {}) {
+    ctx.font = `${weight} ${size}px "Courier New", Courier, monospace`;
+    ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillStyle = color;
+    ctx.fillText(str, Math.round(x), Math.round(y));
+  }
+
+  function drawScenery() {
+    for (const c of clouds) drawSprite(SPR.cloud, c.x, c.y, 2, INK_SOFT);
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, GROUND, W, 2);
+    for (const m of groundMarks) {
+      ctx.fillRect(Math.round(m.x), GROUND + 8 + (m.w % 3) * 4, m.w, 2);
+    }
+  }
+
+  function drawPlayer() {
+    const p = g.player;
+    const y = GROUND - p.h;
+    drawSprite(SPR.card, p.x, y, CARD_SCALE);
+    drawSprite(LOGO, p.x + p.w - LOGO[0].length - 2 * CARD_SCALE + 1, y + p.h - LOGO.length - CARD_SCALE - 3, 1);
+    if (g.reloading) {
+      const bw = p.w, bh = 6, bx = p.x, by = y - 16;
+      const pct = Math.min(1, g.reloadProgress / RELOAD_TIME);
+      ctx.fillStyle = INK; ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = PAPER; ctx.fillRect(bx + 1, by + 1, bw - 2, bh - 2);
+      ctx.fillStyle = INK; ctx.fillRect(bx + 1, by + 1, Math.round((bw - 2) * pct), bh - 2);
+      text('TOPPING UP ' + Math.round(pct * 100) + '%', p.x + p.w / 2, by - 10, { size: 11, align: 'center' });
+    } else if (g.ammo <= 0 && state === 'playing' && Math.floor(performance.now() / 350) % 2 === 0) {
+      text('HOLD SPACE TO TOP UP', p.x + p.w / 2, y - 18, { size: 11, align: 'center' });
+    }
+  }
+
+  function drawItems() {
+    for (const it of g.items) {
+      const damaged = it.hp < it.maxHp;
+      const color = it.flash > 0 ? INK_SOFT : (damaged ? '#7a7a7a' : INK);
+      drawSprite(it.rows, it.x, it.y, it.scale, color);
+      if (damaged) {
+        // crack line across the sprite
+        ctx.fillStyle = PAPER;
+        for (let i = 0; i < it.h; i += 4) ctx.fillRect(Math.round(it.x + it.w * 0.35 + (i / it.h) * it.w * 0.3), Math.round(it.y + i), 4, 3);
+      }
+      text(money(it.value), it.x + it.w / 2, it.y + it.h + 9, { size: it.big ? 15 : 11, align: 'center' });
+      if (it.big) {
+        for (let i = 0; i < it.maxHp; i++) {
+          ctx.fillStyle = i < it.hp ? INK : PAPER;
+          ctx.fillRect(Math.round(it.x + it.w / 2 - 9 + i * 10), Math.round(it.y + it.h + 19), 8, 4);
+          ctx.strokeStyle = INK; ctx.lineWidth = 1;
+          ctx.strokeRect(Math.round(it.x + it.w / 2 - 9 + i * 10) + 0.5, Math.round(it.y + it.h + 19) + 0.5, 7, 3);
+        }
+      }
+    }
+  }
+
+  function drawBullets() { for (const b of g.bullets) drawSprite(SPR.dollar, b.x, b.y, 2); }
+  function drawParticles() { ctx.fillStyle = INK; for (const q of g.particles) ctx.fillRect(Math.round(q.x), Math.round(q.y), q.s, q.s); }
+  function drawFloats() {
+    for (const f of g.floats) {
+      ctx.globalAlpha = Math.min(1, f.t * 2);
+      text(f.text, f.x, f.y, { size: f.big ? 18 : 13, align: 'center' });
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawHud() {
+    // ammo clip (top-left)
+    text('CLIP', 14, 18, { size: 11 });
+    for (let i = 0; i < CLIP; i++) {
+      const x = 52 + i * 7, y = 12;
+      if (i < g.ammo) { ctx.fillStyle = INK; ctx.fillRect(x, y, 4, 12); }
+      else { ctx.fillStyle = INK; ctx.fillRect(x, y, 4, 12); ctx.fillStyle = PAPER; ctx.fillRect(x + 1, y + 1, 2, 10); }
+    }
+    text(String(g.ammo).padStart(2, '0') + '/' + CLIP, 52 + CLIP * 7 + 6, 18, { size: 11 });
+    // lives
+    for (let i = 0; i < LIVES; i++) drawSprite(SPR.heart, 14 + i * 20, 30, 2, i < g.lives ? INK : '#d6d6d6');
+    // wave
+    text('WAVE ' + (1 + Math.floor(g.elapsed / 20)), W / 2, 18, { size: 12, align: 'center' });
+    // score (dino style: HI then current)
+    text('HI ' + money(Math.max(hi, g.score)).padStart(7, ' ') + '  ' + money(g.score).padStart(7, ' '), W - 14, 18, { size: 14, align: 'right' });
+    if (muted) text('MUTED', W - 14, 38, { size: 10, align: 'right', color: INK_SOFT });
+  }
+
+  function drawTitle() {
+    text('PAYHAWK INVADERS', W / 2, 200, { size: 34, align: 'center' });
+    text('Shoot the expenses before they hit your card', W / 2, 240, { size: 13, align: 'center', weight: 'normal' });
+    text('PRESS SPACE TO START', W / 2, 310, { size: 14, align: 'center' });
+    text('Score = total value of expenses shot. Clip of 24 $, hold SPACE 1.2s to top up the card.', W / 2, 350, { size: 11, align: 'center', weight: 'normal' });
+    text('Big double-value expenses need two hits. Miss three and it’s game over.', W / 2, 368, { size: 11, align: 'center', weight: 'normal' });
+    // decorative sample expenses
+    const sample = ['coffee', 'taxi', 'software', 'flight'];
+    sample.forEach((k, i) => drawSprite(SPR[k], W / 2 - 150 + i * 90, 410, 3));
+  }
+
+  function drawOver() {
+    ctx.fillStyle = 'rgba(247,247,247,0.55)'; ctx.fillRect(0, 0, W, H);
+    text('G A M E   O V E R', W / 2, 200, { size: 26, align: 'center' });
+    text('Reimbursed ' + money(g.score) + '  ·  ' + g.shot + ' expenses shot  ·  wave ' + (1 + Math.floor(g.elapsed / 20)), W / 2, 240, { size: 13, align: 'center', weight: 'normal' });
+    if (g.score >= hi && g.score > 0) text('NEW HIGH SCORE', W / 2, 264, { size: 12, align: 'center' });
+    // restart button (dino style circle-arrow)
+    const cx = W / 2, cy = 320;
+    ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(cx, cy, 16, -0.3, Math.PI * 1.6); ctx.stroke();
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(cx + 18, cy - 18); ctx.lineTo(cx + 18, cy); ctx.lineTo(cx + 2, cy - 8); ctx.closePath(); ctx.fill();
+    text('PRESS SPACE TO RESTART', W / 2, 362, { size: 12, align: 'center' });
+  }
+
+  function drawPaused() {
+    ctx.fillStyle = 'rgba(247,247,247,0.55)'; ctx.fillRect(0, 0, W, H);
+    text('P A U S E D', W / 2, 280, { size: 26, align: 'center' });
+    text('PRESS P OR SPACE', W / 2, 320, { size: 12, align: 'center' });
+  }
+
+  function draw() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    if (g.shake > 0) ctx.translate(Math.round(rand(-4, 4)), Math.round(rand(-4, 4)));
+    drawScenery();
+    if (state === 'title') { drawTitle(); drawPlayer(); ctx.restore(); return; }
+    drawItems(); drawBullets(); drawParticles(); drawPlayer(); drawFloats(); drawHud();
+    ctx.restore();
+    if (state === 'over') drawOver();
+    if (state === 'paused') drawPaused();
+  }
+
+  // ---------- loop ----------
+  // Fixed-step simulation so the game keeps real time even when frames are slow/throttled.
+  const STEP = 1 / 120;
+  let last = performance.now(), acc = 0;
+  function frame(now) {
+    acc += Math.min(0.25, (now - last) / 1000); last = now;
+    while (acc >= STEP) {
+      if (state === 'playing') update(STEP);
+      acc -= STEP;
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+  window.__payhawkInvaders = { get state() { return state; }, get game() { return g; }, tick(sec) { for (let t = 0; t < sec; t += STEP) if (state === 'playing') update(STEP); } };
+  canvas.focus();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
